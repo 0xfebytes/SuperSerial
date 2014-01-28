@@ -61,6 +61,9 @@ namespace SuperSerial
                 .Add("home", "sets cursor position to 0,0", home => commands.cursorHome())
                 .Add("i|info", "dipslays baud and i2c address", i => {
                         commands.displayBaud();
+            			// wait for input to change
+		            	Console.WriteLine("Press any key  to show I2C address");
+			            Console.ReadKey();
                         commands.displayI2c(); })
                 .Add("l|left", "sets cursor position x-1", l => commands.cursorLeft())
                 .Add("r|right", "sets cursor position x+1", r => commands.cursorRight())
@@ -100,10 +103,6 @@ namespace SuperSerial
                 displayHelp(options);
             else if (printSentence)
                 serialComm.commPort.Write(String.Join(" ", args));
-
-			// keep the Console open
-			Console.WriteLine("Press any key  to exit...");
-			Console.ReadKey();
 
             // release comm
             serialComm.terminateSerial();
