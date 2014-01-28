@@ -42,24 +42,28 @@ namespace SerialTool
 
             // get the options
             bool showHelp = false;
+            bool printSentence = false;
+
             OptionSet options = new OptionSet()
                 .Add("c|clear", "clears the LCD screen", c => clear())
                 .Add("d=|display=", "turns LCD on(1)/off(0); default off (0)", (int d) => display(d))
                 .Add("p=|position=", "sets the cursor position x,y (top left 1,1)", (byte x, byte y) => setCursor(x, y))
-                .Add("?|h|help", "displays this help", h => showHelp = true);
+                .Add("?|h|help", "displays this help", h => showHelp = true)
+                .Add("<>", words => printSentence = true);
 
+            // parse options
             try {
                 options.Parse(args);
-            }
-            catch (OptionException e) {
+            } catch (OptionException e) {
                 Console.Write("Error: ");
                 Console.WriteLine(e.Message);
                 showHelp = true;
             }
 
-            if ( showHelp ) {
+            if ( showHelp )
                 displayHelp(options);
-            }
+            else if (printSentence)
+                commPort.Write(String.Join(" ", args));
 
 			// keep the Console open
 			Console.WriteLine("Press any key  to exit...");
