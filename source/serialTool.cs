@@ -1,7 +1,9 @@
+// free
 using System;
 using System.IO;
 using System.IO.Ports;
 using System.Reflection;
+using NDesk.Options;
 
 namespace SerialTool
 {
@@ -38,7 +40,26 @@ namespace SerialTool
             initSerial();
             commPort.Open();
 
-            clear();
+            // get the options
+            bool showHelp = false;
+            OptionSet options = new OptionSet()
+                .Add("c|clear", "clears the LCD screen", c => clear())
+                .Add("d=|display=", "turns LCD on(1)/off(0); default off (0)", (int d) => display(d))
+                .Add("p=|position=", "sets the cursor position x,y (top left 1,1)", (byte x, byte y) => setCursor(x, y))
+                .Add("?|h|help", "displays this help", h => showHelp = true);
+
+            try {
+                options.Parse(args);
+            }
+            catch (OptionException e) {
+                Console.Write("Error: ");
+                Console.WriteLine(e.Message);
+                showHelp = true;
+            }
+
+            if ( showHelp ) {
+                displayHelp(options);
+            }
 
 			// keep the Console open
 			Console.WriteLine("Press any key  to exit...");
@@ -141,16 +162,13 @@ namespace SerialTool
             commPort.Write(command, 0, command.Length);
         }
 
-        // turns on the display
-        public static void displayOn()
+        // turns on/off the display
+        public static void display(int val)
         {
-            command(commands.displayOn);
-        }
-
-        // turns off the display
-        public static void displayOff()
-        {
-            command(commands.displayOff);
+            if ( val == 0 )
+                command(commands.displayOff);
+            else
+                command(commands.displayOn);
         }
 
         // sets the cursor position
@@ -380,6 +398,16 @@ namespace SerialTool
         private static byte stringToByte(string hex)
         {
              return (byte)Convert.ToInt16(hex, 16);
+        }
+
+        // prints the options
+        public static void displayHelp(OptionSet options)
+        {
+            Console.WriteLine("Usage:\nserialTool [OPTIONS] <text>");
+            Console.WriteLine("Sends options and / or text to the serial LCD module\n" +
+                    "@COMX as specified in ports.conf\n");
+            Console.WriteLine("Options:");
+            options.WriteOptionDescriptions (Console.Out);
         }
 
 	}
