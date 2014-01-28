@@ -1,53 +1,87 @@
-// free
+/*
+ * SuperSerial is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * SuperSerial is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with SuperSerial.  If not, see <http://www.gnu.org/licenses/>. 
+ * 
+ * Instructions:
+ * 
+ * This program allows writing bytes to a serial com.
+ * Using the LCD namespace.
+ * 
+ * author: Tim Ryan
+*/
 using System;
 using System.IO;
 using System.IO.Ports;
 using System.Reflection;
 using NDesk.Options;
+using Serial;
+using LCD;
 
-namespace SerialTool
+namespace SuperSerial
 {
-    // for all of the command information
-    public class CommandsInfo
-    {
-	    public byte command, displayOn, displayOff,
-	        cursorHome, underlineOn, underlineOff,
-	        cursorLeft, cursorRight, blinkOn,
-	        blinkOff, backspace, clear, contrast,
-	        brightness, customChar, displayLeft,
-	        displayRight, baudRate, i2cAddress,
-	        displayBaud, displayI2c, setCursor;
-	}
-
-	public class hello
+	public class SerialTool
 	{
-        static SerialPort commPort;
-        static CommandsInfo commands;
+        static Port serialComm;
+        static Commands commands;
 
         /*
          * *****************************MAIN************************************
          */
 		static int Main(string[] args)
 		{
-            // for storing commands
-            commands = new CommandsInfo();
-            // get command bytes from config file
-            initCommands();
-
-            // create serial
-            commPort = new SerialPort();
             // set up serial
-            initSerial();
-            commPort.Open();
+            serialComm = new Port();
+            serialComm.initSerial();
 
-            // get the options
+            // set up commands
+            commands = new Commands();
+            commands.initCommands(serialComm);
+
+            // flags for options
             bool showHelp = false;
             bool printSentence = false;
 
+            // get the options
             OptionSet options = new OptionSet()
-                .Add("c|clear", "clears the LCD screen", c => clear())
-                .Add("d=|display=", "turns LCD on(1)/off(0); default off (0)", (int d) => display(d))
-                .Add("p=|position=", "sets the cursor position x,y (top left 1,1)", (byte x, byte y) => setCursor(x, y))
+                // short (common)
+                .Add("b|backspace", "equivalent to backspace key", bs => commands.backspace())
+                .Add("c|clear", "clears the LCD screen", c => commands.clear())
+                .Add("displayleft", "shifts display x-1", dl => commands.displayLeft())
+                .Add("displayright", "shifts display x+1", dr => commands.displayRight())
+                .Add("home", "sets cursor position to 0,0", home => commands.cursorHome())
+                .Add("i|info", "dipslays baud and i2c address", i => {
+                        commands.displayBaud();
+                        commands.displayI2c(); })
+                .Add("l|left", "sets cursor position x-1", l => commands.cursorLeft())
+                .Add("r|right", "sets cursor position x+1", r => commands.cursorRight())
+                // long only (not used as much)
+                .Add("baud=", "change the baud rate; default 9600"
+                        , (byte baud) => commands.setBaud(baud))
+                .Add("blink=", "turns blinking cursor on(1)/off(0); default off (0)"
+                        , (int b) => commands.blink(b))
+                .Add("brightness=", "change brightness 1-8; default 5"
+                        , (byte br) => commands.display(br))
+                .Add("contrast=", "change contrast 1-50; default 40"
+                        , (byte w) => commands.setContrast(w))
+                .Add("display=", "turns LCD on(1)/off(0); default off (0)"
+                        , (int d) => commands.display(d))
+                .Add("i2c=", "change the I2C address; default 0x50"
+                        , (byte addr) => commands.setI2c(addr))
+                .Add("position=", "sets the cursor position x,y (top left" +
+                        "1,1)", (byte x, byte y) => commands.setCursor(x, y))
+                .Add("underline=", "turns underline on(1)/off(0); default off (0)"
+                        , (int u) => commands.underline(u))
+                // help and default
                 .Add("?|h|help", "displays this help", h => showHelp = true)
                 .Add("<>", words => printSentence = true);
 
@@ -60,350 +94,26 @@ namespace SerialTool
                 showHelp = true;
             }
 
+            // shows help if flag is set
+            // otherwise prints text
             if ( showHelp )
                 displayHelp(options);
             else if (printSentence)
-                commPort.Write(String.Join(" ", args));
+                serialComm.commPort.Write(String.Join(" ", args));
 
 			// keep the Console open
 			Console.WriteLine("Press any key  to exit...");
 			Console.ReadKey();
 
             // release comm
-            commPort.Close();
+            serialComm.terminateSerial();
+
             return 0;
 		}
 
         /*
-         * ***************************SERIAL************************************
-         */
-        // retrieves serial port info from config and sets it up
-        private static void initSerial()
-        {
-            string line;
-            string serialFile = "config/port.conf";
-            
-            try
-            {
-                using ( StreamReader serialConf =
-                        new StreamReader(serialFile) )
-                {
-                    while ( (line = serialConf.ReadLine()) != null )
-                    {
-                        if ( line.Contains("port") )
-                             setPortName(line.Substring(line.IndexOf("=") + 1));
-                        else if ( line.Contains("baud") )
-                            setPortBaud(line.Substring(line.IndexOf("=") + 1));
-                        else if ( line.Contains("parity") )
-                            setPortParity(line.Substring(line.IndexOf("=") + 1));
-                        else if ( line.Contains("dataBits") )
-                            setPortData(line.Substring(line.IndexOf("=") + 1));
-                        else if ( line.Contains("stopBits") )
-                            setPortStop(line.Substring(line.IndexOf("=") + 1));
-                        else if ( line.Contains("handshake") )
-                            setPortHandshake(line.Substring(line.IndexOf("=") + 1));
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine("Could not read: {0}", serialFile);
-                Console.WriteLine(e.Message);
-                System.Environment.Exit( 1 );
-            }
-        }
-
-        // sets the port for serial
-        public static void setPortName(string name)
-        {
-            commPort.PortName = name;
-        }
-
-        // sets the baud for serial
-        public static void setPortBaud(string baud)
-        {
-            commPort.BaudRate = Convert.ToInt32(baud);
-        }
-
-        // sets the parity for serial
-        public static void setPortParity(string parity)
-        {
-            commPort.Parity = (Parity)Enum.Parse(typeof(Parity), parity, true);
-        }
-
-        // sets the databits for serial
-        public static void setPortData(string dataBits)
-        {
-            commPort.DataBits = Convert.ToInt32(dataBits);
-        }
-
-        // sets the stopbits for serial
-        public static void setPortStop(string stopBits)
-        {
-            commPort.StopBits = (StopBits)Enum.Parse(typeof(StopBits), stopBits, true);
-        }
-
-        // sets the handshake for serial
-        public static void setPortHandshake(string handshake)
-        {
-            commPort.Handshake = (Handshake)Enum.Parse(typeof(Handshake), handshake, true);
-        }
-
-        /*
-         * *********************************COMMANDS****************************
-         */
-        // writes command without additional arguments
-        private static void command(byte cmd)
-        {
-            byte[] command = {commands.command, cmd};
-            commPort.Write(command, 0, command.Length);
-        }
-
-        // writes command with additional arguments
-        private static void command1(byte cmd, byte arg)
-        {
-            byte[] command = {commands.command, cmd, arg};
-            commPort.Write(command, 0, command.Length);
-        }
-
-        // turns on/off the display
-        public static void display(int val)
-        {
-            if ( val == 0 )
-                command(commands.displayOff);
-            else
-                command(commands.displayOn);
-        }
-
-        // sets the cursor position
-        // first position 1,1
-        public static void setCursor(byte x, byte y)
-        {
-            // check values
-            if (x < 1 || x > 20 || y < 1 || y > 4)
-            {
-                Console.WriteLine("Bad cursor position.\nCursor x: 1 - 20\n" +
-                        "Cursor y: 1 - 4");
-                return;
-            }
-
-            byte position = 0x00;
-            if (y == 1)
-                position = (byte)(0x00 + x - 1);
-            else if (y == 2)
-                position = (byte)(0x40 + x - 1);
-            else if (y == 3)
-                position = (byte)(0x14 + x - 1);
-            else if (y == 4)
-                position = (byte)(0x54 + x - 1);
-
-            command1(commands.setCursor, position);
-        }
-
-        // sets cursor home
-        public static void cursorHome()
-        {
-            command(commands.cursorHome);
-        }
-
-        // turns on underline
-        public static void underlineOn()
-        {
-            command(commands.underlineOn);
-        }
-
-        // turns off underline
-        public static void underlineOff()
-        {
-            command(commands.underlineOff);
-        }
-
-        // move cursor left
-        public static void cursorLeft()
-        {
-            command(commands.cursorLeft);
-        }
-
-        // move cursor right
-        public static void cursorRight()
-        {
-            command(commands.cursorRight);
-        }
-
-        // turns on blink
-        public static void blinkOn()
-        {
-            command(commands.blinkOn);
-        }
-
-        // turns off blink
-        public static void blinkOff()
-        {
-            command(commands.blinkOff);
-        }
-
-        // backspace
-        public static void backspace()
-        {
-            command(commands.backspace);
-        }
-
-        // clear screen
-        public static void clear()
-        {
-            command(commands.clear);
-        }
-
-        // sets the contrast
-        // 1-50, default 50
-        public static void setContrast(byte val)
-        {
-            command1(commands.contrast, val);
-        }
-
-        // sets the brightness
-        // 1-8, default 5
-        public static void setBrightness(byte val)
-        {
-            command1(commands.brightness, val);
-        }
-
-        // loads custom char
-        // 9 additional bytes
-        // 1st byte address - 1-7
-        // other 8 patter
-        public static void loadCustomChar(byte addr, byte[] character)
-        {
-            command1(commands.customChar, addr);
-            commPort.Write(character, 0, character.Length);
-        }
-
-        // move display left
-        public static void displayLeft()
-        {
-            command(commands.displayLeft);
-        }
-
-        // move display right
-        public static void displayRight()
-        {
-            command(commands.displayRight);
-        }
-
-        // sets the baudrate
-        // 1-8, default 4 (9600)
-        public static void setBaud(byte val)
-        {
-            if (val > 8)
-            {
-                Console.WriteLine("Invalid Baud Rate\n1 - 300\n2 - 1200\n" +
-                        "3 - 2400\n4 - 9600\n5 - 14400\n6 - 19200\n" +
-                        "7 - 57600\n8 - 115200");
-                return;
-            }
-            
-            command1(commands.baudRate, val);
-        }
-
-        // sets the I2C address
-        // 0x00 - 0xfe, default 0x50
-        public static void setI2C(byte val)
-        {
-            command1(commands.i2cAddress, val);
-        }
-
-        // display baudrate
-        public static void displayBaud()
-        {
-            command(commands.displayBaud);
-        }
-
-        // display i2c address
-        public static void displayI2c()
-        {
-            command(commands.displayI2c);
-        }
-
-        /*
-         * ********************************CONFIG*******************************
-         */
-        // retrieves the commands from the config file
-        private static void initCommands()
-        {
-            string line;
-            string commandsFile = "config/commands.conf";
-            
-            try
-            {
-                using ( StreamReader commandsConf =
-                        new StreamReader(commandsFile) )
-                {
-                    while ( (line = commandsConf.ReadLine()) != null )
-                    {
-                        if ( line.Contains("command") )
-                            commands.command = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("displayOn") )
-                            commands.displayOn = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("displayOff") )
-                            commands.displayOff = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("cursorHome") )
-                            commands.cursorHome = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("underlineOn") )
-                            commands.underlineOn = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("underlineOff") )
-                            commands.underlineOff = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("cursorLeft") )
-                            commands.cursorLeft = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("cursorRight") )
-                            commands.cursorRight = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("blinkOn") )
-                            commands.blinkOn = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("blinkOff") )
-                            commands.blinkOff = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("backspace") )
-                            commands.backspace = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("clear") )
-                            commands.clear = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("contrast") )
-                            commands.contrast = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("brightness") )
-                            commands.brightness = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("customChar") )
-                            commands.customChar = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("displayLeft") )
-                            commands.displayLeft = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("displayRight") )
-                            commands.displayRight = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("baudRate") )
-                            commands.baudRate = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("i2dAddress") )
-                            commands.i2cAddress = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("displayBaud") )
-                            commands.displayBaud = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("displayI2c") )
-                            commands.displayI2c = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                        else if ( line.Contains("setCursor") )
-                            commands.setCursor = stringToByte(line.Substring(line.IndexOf("0x"), 4));
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine("Could not read: {0}", commandsFile);
-                Console.WriteLine(e.Message);
-                System.Environment.Exit( 1 );
-            }
-        }
-
-        /*
          * *********************************MISC********************************
          */
-        // converts hex string to byte
-        private static byte stringToByte(string hex)
-        {
-             return (byte)Convert.ToInt16(hex, 16);
-        }
-
         // prints the options
         public static void displayHelp(OptionSet options)
         {
